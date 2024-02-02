@@ -69,6 +69,7 @@ Build-time dependencies
 Use `Developer Command Prompt` as a build environment
 
 `Visual Studio 2019`:
+
 ```cmd
 git clone https://github.com/netxs-group/vtm.git
 cd ./vtm
@@ -78,7 +79,9 @@ cmake --build . --config Release
 cd Release
 vtm
 ```
+
 `Visual Studio 2022`:
+
 ```cmd
 git clone https://github.com/netxs-group/vtm.git
 cd ./vtm
@@ -443,6 +446,7 @@ Type              | Parameter        | Description
 `Region`          | | The `param` attribute is not used, use attribute `title=_view_title_` to set region name.
 
 The following configuration items have the same meaning
+
 ```
 <item …. param=‘mc’/>
 <item …. type=SHELL param=‘mc’/>
@@ -453,6 +457,7 @@ The following configuration items have the same meaning
 ### Configuration Example
 
 Note: The following configuration sections are not implemented yet
+
 - config/menu/item/hotkeys
 - config/hotkeys
 
@@ -804,6 +809,7 @@ Note: `$0` will be expanded to the fully qualified current module filename when 
       Terminal window menu can be composed from scratch by specifying a list of menu items in the `/config/term/menu/` configuration file section.
 
       Example
+
       ```xml
       <config>
        <term>
