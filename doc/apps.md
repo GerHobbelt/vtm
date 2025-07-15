@@ -21,6 +21,8 @@
 - Configurable scrollback buffer size (100k lines by default, limited by `max_int32` and system RAM).
 - Search for text in the scrollback buffer.
 - Linear and rectangular text selection for copying and searching.
+- Full [VT2D](character_geometry.md) support.
+- Shadow SGR attribute. See below for details.
 - Support for several formats of copying the selected text:
   - Plain text
   - RTF
@@ -53,6 +55,93 @@ Name         | Sequence                         | Description
 `CCC_RTL`    | `CSI` 13 : n `p`                 | Set text right-to-left mode, _default is Off_:<br>`n = 0`<br>`n = 1` On<br>`n = 2` Off
 
 Note: It is possible to combine multiple command into a single sequence using a semicolon. For example, the following sequence disables line wrapping, enables text selection, and sets background to blue: `\e[12:2;29:1;28:44p` or `\e[12:2;29:1;28:48:2:0:0:255p`.
+
+### Shadow SGR attribute
+
+Built-in terminal supports a shadow SGR attribute in form of 3x3 shadow cube:
+- `CSI` 2 : n `m`  
+  where n=0-255 is a bit field to specify shadows inside the cell.
+
+```
+Shadow bits:  0  1  2
+              3 >n< 4
+              5  6  7
+```
+Every bit drops the shadow inside the cell.
+
+Shadows persist as an SGR attribute and are visible in GUI mode.
+
+#### Examples
+- The shadow around a 1x1 window:
+  ```
+   0  0  0   0  0  0   0  0  0
+   0 >1< 0   0 >2< 0   0 >4< 0
+   0  0  1   0  1  0   1  0  0
+           ┌─────────┐        
+   0  0  0 │         │ 0  0  0
+   0 >8< 1 │  1x1    │ 1 >16<0
+   0  0  0 │  Window │ 0  0  0
+           └─────────┘        
+   0  0  1   0  1  0   1  0  0
+   0 >32<0   0 >64<0   0>128<0
+   0  0  0   0  0  0   0  0  0
+    ```
+- 3x1 shadow (outer and inner), `pwsh`:
+  ```pwsh
+  "`e[107;30m";`
+  "`e[2:1m `e[2:3m `e[2:7m `e[2:6m `e[2:4m ";`
+  "`e[2:8m `e[2:0m A `e[2:16m ";`
+  "`e[2:32m `e[2:96m `e[2:224m `e[2:192m `e[2:128m ";`
+  " `e[2:247m `e[2:231mA`e[2:239m `e[2:0m ";`
+  "     `e[m"
+  
+  ```
+  ![image](https://github.com/user-attachments/assets/4c485864-7e50-4356-ad77-da65f2a5764e)
+
+### VT2D support
+
+The built-in terminal supports Unicode character geometry modifiers (VT2D). See [Unicode character Geometry Modifiers](character_geometry.md) for details.
+
+Example 1. Output a 3x1 (31_00) character:
+  - `pwsh`
+    ```pwsh
+    "👩‍👩‍👧‍👧`u{D009F}"
+    ```
+  - `bash`
+    ```bash
+    printf "👩‍👩‍👧‍👧\UD009F\n"
+    ```
+Example 2. Output a 6x2 character (by stacking two 6x1 fragments 62_01 and 62_02 on top of each other):
+  - `pwsh`
+    ```pwsh
+    "👩‍👩‍👧‍👧`u{D0279}`n👩‍👩‍👧‍👧`u{D0312}"
+    ```
+  - `bash`
+    ```bash
+    printf "👩‍👩‍👧‍👧\UD0279\n👩‍👩‍👧‍👧\UD0312\n"
+    ```
+Example 3. Output a solid 9x3 character:
+  - `pwsh`
+    ```pwsh
+    "👩‍👩‍👧‍👧`u{D03C3}"
+    ```
+  - `bash`
+    ```bash
+    printf "👩‍👩‍👧‍👧\UD03C3\n"
+    ```
+Example 4. Output the longest word in the Hindi language 16x1 (G1_00):
+  - `pwsh`
+    ```pwsh
+    "`u{2}विश्वविज्ञानकोशनिर्माणसमिति`u{D0121}"
+    ```
+  - `bash`
+    ```bash
+    printf "\U2विश्वविज्ञानकोशनिर्माणसमिति\UD0121\n"
+    ```
+Screenshot:  
+  ![image](images/vtm_character_geometry_modifiers_screenshot.png)
+
+### Window menu
 
 It is possible to create your own terminal window menu from scratch by configuring own menu items in the `<config/terminal/menu/>` subsection of the configuration file. See (`doc/settings.md#event-scripting`)[https://github.com/directvt/vtm/blob/master/doc/settings.md#event-scripting] for details.
 
@@ -102,12 +191,13 @@ Hotkey                       | Description
 ### Configuration example
 
 ```xml
+<OnLeftClick on="LeftClick"/>
 <config>
     <terminal>
         <menu item*>
             <item label="  " tooltip=" just empty menu item "/>
             <item id="test_button" label=" Repeatable button " tooltip=" test ">
-                <script on="MouseDown" on="Enter" on="Space">  <!-- Script to colorize the pressed label (by any mouse button) and printing 'Test' while it is pressed. -->
+                <script on="MouseDown">  <!-- Script to colorize the pressed label (by any mouse button) and printing 'Test' while it is pressed. -->
                     if (not vtm.gear.IsKeyRepeated()) then    -- First run - colorize label and activate the mouse button to repeat.
                         vtm.test_button.Label("\e[44m Repeatable button \e[m")
                         vtm.test_button.Deface()
@@ -115,38 +205,36 @@ Hotkey                       | Description
                     end
                     vtm.terminal.Print('Test\\n')
                 </script>
-                <script on="MouseUp" on="-Enter" on="-Space">  <!-- Script to restore default label state. -->
+                <script on="MouseUp">  <!-- Script to restore default label state. -->
                     vtm.test_button.Label(" Repeatable button ")    -- Restore default colors.
                     vtm.test_button.Deface()
                 </script>
             </item>
-            <item label="  Restart  ">      <script=TerminalRestart                    on="LeftClick"/></item>
-            <item label="  End  ">          <script=TerminalScrollViewportToEnd        on="LeftClick"/></item>
-            <item label="  Top  ">          <script=TerminalScrollViewportToTop        on="LeftClick"/></item>
-            <item label="  PgLeft  ">       <script=TerminalScrollViewportOnePageLeft  on="LeftClick"/></item>
-            <item label="  PgRight  ">      <script=TerminalScrollViewportOnePageRight on="LeftClick"/></item>
-            <item label="  PgUp  ">         <script=TerminalScrollViewportOnePageUp    on="LeftClick"/></item>
-            <item label="  PgDn  ">         <script=TerminalScrollViewportOnePageDown  on="LeftClick"/></item>
-            <item label="  CharLeft  ">     <script=TerminalScrollViewportOneCellLeft  on="LeftClick"/></item>
-            <item label="  CharRight  ">    <script=TerminalScrollViewportOneCellRight on="LeftClick"/></item>
-            <item label="  LineUp  ">       <script=TerminalScrollViewportOneLineUp    on="LeftClick"/></item>
-            <item label="  LineDn  ">       <script=TerminalScrollViewportOneLineDown  on="LeftClick"/></item>
-            <item label="  PrnScr  ">       <script=TerminalCopyViewport               on="LeftClick"/></item>
-            <item label="  Deselect  ">     <script=TerminalSelectionCancel            on="LeftClick"/></item>
-            <item label="  SelectionForm  "><script=TerminalSelectionForm              on="LeftClick"/></item>
-            <item label="  Copy  ">         <script=TerminalCopySelection              on="LeftClick"/></item>
-            <item label="  Paste  ">        <script=TerminalClipboardPaste             on="LeftClick"/></item>
-            <item label="  Wipe  ">         <script=TerminalClipboardWipe              on="LeftClick"/></item>
-            <item label="  Undo  ">         <script=TerminalUndo                       on="LeftClick"/></item>
-            <item label="  Redo  ">         <script=TerminalRedo                       on="LeftClick"/></item>
-
-            <item label="  Quit  ">         <script=CloseApplet                        on="LeftClick"/></item>
-            <item label="  Fullscreen  ">   <script=FullscreenApplet                   on="LeftClick"/></item>
-            <item label="  Maximize  ">     <script=MaximizeApplet                     on="LeftClick"/></item>
-            <item label="  Minimize  ">     <script=MinimizeApplet                     on="LeftClick"/></item>
-
+            <item label="  Restart  "       script=OnLeftClick | TerminalRestart                    />
+            <item label="  End  "           script=OnLeftClick | TerminalScrollViewportToEnd        />
+            <item label="  Top  "           script=OnLeftClick | TerminalScrollViewportToTop        />
+            <item label="  PgLeft  "        script=OnLeftClick | TerminalScrollViewportOnePageLeft  />
+            <item label="  PgRight  "       script=OnLeftClick | TerminalScrollViewportOnePageRight />
+            <item label="  PgUp  "          script=OnLeftClick | TerminalScrollViewportOnePageUp    />
+            <item label="  PgDn  "          script=OnLeftClick | TerminalScrollViewportOnePageDown  />
+            <item label="  CharLeft  "      script=OnLeftClick | TerminalScrollViewportOneCellLeft  />
+            <item label="  CharRight  "     script=OnLeftClick | TerminalScrollViewportOneCellRight />
+            <item label="  LineUp  "        script=OnLeftClick | TerminalScrollViewportOneLineUp    />
+            <item label="  LineDn  "        script=OnLeftClick | TerminalScrollViewportOneLineDown  />
+            <item label="  PrnScr  "        script=OnLeftClick | TerminalCopyViewport               />
+            <item label="  Deselect  "      script=OnLeftClick | TerminalSelectionCancel            />
+            <item label="  SelectionForm  " script=OnLeftClick | TerminalSelectionForm              />
+            <item label="  Copy  "          script=OnLeftClick | TerminalCopySelection              />
+            <item label="  Paste  "         script=OnLeftClick | TerminalClipboardPaste             />
+            <item label="  Wipe  "          script=OnLeftClick | TerminalClipboardWipe              />
+            <item label="  Undo  "          script=OnLeftClick | TerminalUndo                       />
+            <item label="  Redo  "          script=OnLeftClick | TerminalRedo                       />
+            <item label="  Quit  "          script=OnLeftClick | CloseApplet                        />
+            <item label="  Fullscreen  "    script=OnLeftClick | FullscreenApplet                   />
+            <item label="  Maximize  "      script=OnLeftClick | MaximizeApplet                     />
+            <item label="  Minimize  "      script=OnLeftClick | MinimizeApplet                     />
             <item label="  CwdSync  ">
-                <script=TerminalCwdSync on="LeftClick"/>
+                <script=OnLeftClick | TerminalCwdSync/>
                 <script>  <!-- A binding to update the menu item label at runtime. -->
                     <on="preview: terminal::events::toggle::cwdsync" source="terminal"/>
                     local state=vtm()                   -- Use event arguments to get the current state.
@@ -155,16 +243,9 @@ Hotkey                       | Description
                     vtm.item.Deface()
                 </script>
             </item>
-
-            <item label="  Hello, World! " tooltip=" Simulate keypresses ">
-                <script=TerminalSendKey on="LeftClick"/>
-            </item>
-            <item label="  Push Me  " tooltip=" test ">
-                <script="vtm.terminal.Print('\\x1b[37mPush Me\\x1b[m')" on="LeftClick"/>
-            </item>
-
-            <item label="  One-Shot  ">
-                <script=TerminalSelectionOneShot on="LeftClick"/>
+            <item label="  Hello, World! " tooltip=" Simulate keypresses " script=OnLeftClick | TerminalSendKey/>
+            <item label="  Push Me  "      tooltip=" test "                script="vtm.terminal.Print('\\x1b[37mPush Me\\x1b[m')" | OnLeftClick/>
+            <item label="  One-Shot  " script=OnLeftClick | TerminalSelectionOneShot>
                 <tooltip>
                     " One-shot toggle to select and copy text \n"
                     " while mouse tracking is active.         "
@@ -200,7 +281,7 @@ Hotkey                       | Description
             <script=TerminalClipboardPaste             on="preview:Shift+Insert" />
             <script=TerminalClipboardWipe              on=""                     />
             <script=TerminalClipboardFormat            on=""                     />
-            <script=TerminalSelectionRect              on=""                     />
+            <script=TerminalSelectionForm              on=""                     />
             <script=TerminalSelectionOneShot           on=""                     />
             <script=TerminalUndo                       on=""                     />
             <script=TerminalRedo                       on=""                     />
@@ -252,13 +333,19 @@ Tiling Window Manager is a window container that organizes the workspace into mu
 ### Configuration example
 
 ```xml
+<OnLeftClick on="LeftClick"/>
+<Menu>
+    <Defaults>
+        <autohide=false/>  <!-- Auto hide window menu items on mouse leave. -->
+        <slim=true/>       <!-- Make the window menu one cell high (slim=true) or three cells high (slim=false). -->
+    </Defaults>
+</Menu>
 <config>
     <tile>
         <menu item*>
-            <autohide=menu/autohide/>
-            <slim=menu/slim/>
-            <item label="  " tooltip=" AlwaysOnTop off ">
-                <script=AlwaysOnTopApplet on="LeftClick"/> <!-- The default event source is the parent object, i.e. source="item" (aka vtm.item). -->
+            <autohide=/Menu/Defaults/autohide/>
+            <slim=/Menu/Defaults/slim/>
+            <item label="  " tooltip=" AlwaysOnTop off " script=OnLeftClick | AlwaysOnTopApplet> <!-- The default event source is the parent object, i.e. source="item" (aka vtm.item). -->
                 <script>  <!-- A binding to update the menu item label at runtime. -->
                     <on="release: e2::form::prop::zorder" source="applet"/>
                     local is_topmost=vtm()                   -- Use event arguments to get the current state.
@@ -275,18 +362,18 @@ Tiling Window Manager is a window container that organizes the workspace into mu
                     " The app to run can be set by RightClick on the taskbar. "
                 </tooltip>
             </item>
-            <item label="  :::  " tooltip=" Select all panes "                                    ><script=TileSelectAllPanes     on="LeftClick"/></item>
-            <item label="   │   " tooltip=" Split active panes horizontally "                     ><script=TileSplitHorizontally  on="LeftClick"/></item>
-            <item label="  ──  "  tooltip=" Split active panes vertically "                       ><script=TileSplitVertically    on="LeftClick"/></item>
-            <item label="  ┌┘  "  tooltip=" Change split orientation "                            ><script=TileSplitOrientation   on="LeftClick"/></item>
-            <item label="  <->  " tooltip=" Swap two or more panes "                              ><script=TileSwapPanes          on="LeftClick"/></item>
-            <item label="  >|<  " tooltip=" Equalize split ratio "                                ><script=TileEqualizeSplitRatio on="LeftClick"/></item>
-            <item label='  "…"  ' tooltip=" Set tiling window manager title using clipboard data "><script=TileSetManagerTitle    on="LeftClick"/></item>
-            <item label="  ×  "   tooltip=" Close active application "                            ><script=TileClosePane          on="LeftClick"/></item>
-            <!-- <item label="  <  "   tooltip=" Focus the previous pane or the split grip "><script=TileFocusPrev      on="LeftClick"/></item> -->
-            <!-- <item label="  >  "   tooltip=" Focus the next pane or the split grip "    ><script=TileFocusNext      on="LeftClick"/></item> -->
-            <!-- <item label="  <-  "  tooltip=" Focus the previous pane "                  ><script=TileFocusPrevPane  on="LeftClick"/></item> -->
-            <!-- <item label="  ->  "  tooltip=" Focus the next pane "                      ><script=TileFocusNextPane  on="LeftClick"/></item> -->
+            <item label="  :::  " tooltip=" Select all panes "                                     script=OnLeftClick | TileSelectAllPanes     />
+            <item label="   │   " tooltip=" Split active panes horizontally "                      script=OnLeftClick | TileSplitHorizontally  />
+            <item label="  ──  "  tooltip=" Split active panes vertically "                        script=OnLeftClick | TileSplitVertically    />
+            <item label="  ┌┘  "  tooltip=" Change split orientation "                             script=OnLeftClick | TileSplitOrientation   />
+            <item label="  <->  " tooltip=" Swap two or more panes "                               script=OnLeftClick | TileSwapPanes          />
+            <item label="  >|<  " tooltip=" Equalize split ratio "                                 script=OnLeftClick | TileEqualizeSplitRatio />
+            <item label='  "…"  ' tooltip=" Set tiling window manager title using clipboard data " script=OnLeftClick | TileSetManagerTitle    />
+            <item label="  ×  "   tooltip=" Close active application "                             script=OnLeftClick | TileClosePane          />
+            <!-- <item label="  <  "   tooltip=" Focus the previous pane or the split grip " script=OnLeftClick | TileFocusPrev    /> -->
+            <!-- <item label="  >  "   tooltip=" Focus the next pane or the split grip "     script=OnLeftClick | TileFocusNext    /> -->
+            <!-- <item label="  <-  "  tooltip=" Focus the previous pane "                   script=OnLeftClick | TileFocusPrevPane/> -->
+            <!-- <item label="  ->  "  tooltip=" Focus the next pane "                       script=OnLeftClick | TileFocusNextPane/> -->
         </menu>
     </tile>
     <events>

@@ -12,7 +12,6 @@ namespace netxs::app::desk
     struct spec
     {
         text   menuid{};
-        text    alias{};
         bool   hidden{}; // Hide existing item on taskbar.
         bool    fixed{}; // Item can't be updated by the new instance (see desk::events::exec).
         text    label{};
@@ -397,7 +396,7 @@ namespace netxs::app::desk
             return apps;
         };
 
-        auto build = [](eccc usrcfg, xmls& config)
+        auto build = [](eccc usrcfg, settings& config)
         {
             auto tall = si32{ skin::globals().menuwide };
             auto inactive_color  = skin::globals().inactive;
@@ -405,17 +404,17 @@ namespace netxs::app::desk
             auto cA = inactive_color;
             auto c1 = danger_color;
 
-            auto menu_bg_color = config.take("/config/desktop/taskbar/colors/bground", cell{}.fgc(whitedk).bgc(0x60202020));
-            auto menu_min_conf = config.take("/config/desktop/taskbar/width/folded",   si32{ 5  });
-            auto menu_max_conf = config.take("/config/desktop/taskbar/width/expanded", si32{ 32 });
+            auto menu_bg_color = config.settings::take("/config/desktop/taskbar/colors/bground", cell{}.fgc(whitedk).bgc(0x60202020));
+            auto menu_min_conf = config.settings::take("/config/desktop/taskbar/width/folded",   si32{ 5  });
+            auto menu_max_conf = config.settings::take("/config/desktop/taskbar/width/expanded", si32{ 32 });
             auto bttn_min_size = twod{ 31, 1 + tall * 2 };
             auto bttn_max_size = twod{ -1, 1 + tall * 2 };
 
             auto window = ui::fork::ctor(axis::Y, 0, 0, 1);
-            auto panel_top = config.take("/config/desktop/panel/height", 1);
-            auto panel_env = config.take("/config/desktop/panel/env", ""s);
-            auto panel_cwd = config.take("/config/desktop/panel/cwd", ""s);
-            auto panel_cmd = config.take("/config/desktop/panel/cmd", ""s);
+            auto panel_top = config.settings::take("/config/desktop/panel/height", 1);
+            auto panel_env = config.settings::take("/config/desktop/panel/env", ""s);
+            auto panel_cwd = config.settings::take("/config/desktop/panel/cwd", ""s);
+            auto panel_cmd = config.settings::take("/config/desktop/panel/cmd", ""s);
             auto panel = window->attach(slot::_1, ui::cake::ctor());
             if (panel_cmd.size())
             {
@@ -546,6 +545,16 @@ namespace netxs::app::desk
                 });
             ground->attach(world_ptr);
             auto taskbar_viewport = ground->attach(ui::fork::ctor(axis::X));
+            auto viewport = taskbar_viewport->attach(slot::_2, ui::mock::ctor())
+                ->invoke([&](auto& boss)
+                {
+                    boss.LISTEN(tier::release, e2::postrender, parent_canvas) // Draw a shadow to the right of the taskbar.
+                    {
+                        auto vert_line = parent_canvas.clip();
+                        vert_line.size.x = 1;
+                        parent_canvas.fill(vert_line, cell::shaders::shadow(ui::pro::ghost::x1y1_x1y2_x1y3));
+                    };
+                });
             auto taskbar_grips = taskbar_viewport->attach(slot::_1, ui::fork::ctor(axis::X))
                 ->limits({ menu_min_size, -1 }, { menu_min_size, -1 })
                 ->plugin<pro::timer>()
