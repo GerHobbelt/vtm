@@ -528,8 +528,10 @@ namespace netxs::ui
             auto& gear = *gear_ptr;
             gear.set_multihome();
             gear.hids::take(device);
-            //todo should we set default gear here?
-            base::strike();
+            if (props.legacy_mode & ui::console::mouse)
+            {
+                base::deface(); // Unconditional viewport update to redraw mouse cursor.
+            }
         }
         void fire(hint event_id)
         {
@@ -567,7 +569,7 @@ namespace netxs::ui
             static const auto busy = cell{}.bgc(reddk).fgc(0xFFffffff);
             auto brush = gear.m_sys.buttons ? cell{ busy }.txt(64 + (char)gear.m_sys.buttons/*A-Z...*/)
                                             : idle;
-            auto area = rect{ gear.owner.coor() + gear.coord, dot_11 };
+            auto area = rect{ gear.coord, dot_11 };
             parent_canvas.fill(area, cell::shaders::fuse(brush));
         }
         void draw_mouse_pointer(face& parent_canvas)

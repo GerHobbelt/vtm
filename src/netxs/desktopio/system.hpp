@@ -48,7 +48,7 @@
     #include <syslog.h>     // syslog, daemonize
 
     #include <sys/types.h>
-    #include <sys/stat.h>
+    #include <sys/stat.h>   // ::chmod()
     #include <fcntl.h>      // ::splice()
 
     #if defined(__linux__)
@@ -59,6 +59,9 @@
             #include <sys/kd.h>     // ::console_ioctl()
         #endif
         #include <linux/keyboard.h> // ::keyb_ioctl()
+        #include <linux/input.h>    // mouse button codes: BTN_LEFT ...
+        #include <libinput.h>       // libinput API
+        #include <dlfcn.h>          // ::dlopen()
     #endif
 
     #if defined(__APPLE__)
@@ -3757,6 +3760,9 @@ namespace netxs::os
         static auto backup = tios{}; // dtvt: Saved console state to restore at exit.
         static auto gridsz = twod{}; // dtvt: Initial window grid size.
         static auto client = xipc{}; // dtvt: Internal IO link.
+        static auto wheelrate = 3;   // dtvt: Lines per mouse wheel step (legacy mode).
+        static auto tty_name = text{}; // dtvt: TTY device name.
+        static auto ttynum = 0;        // dtvt: /dev/ttyX index (X).
 
         auto consize()
         {
@@ -4001,14 +4007,37 @@ namespace netxs::os
                     dtvt::vtmode |= nt16 ? ui::console::nt | ui::console::nt16
                                          : ui::console::nt;
                 }
-                #elif defined(__linux__)
-                    if (os::linux_console) dtvt::vtmode |= ui::console::mouse;
                 #endif
                 auto colorterm = os::env::get("COLORTERM");
                 term = text{ dtvt::vtmode & ui::console::nt16 ? "Windows Console" : "" };
                 if (term.empty()) term = os::env::get("TERM");
                 if (term.empty()) term = os::env::get("TERM_PROGRAM");
                 if (term.empty()) term = "xterm-compatible";
+                #if defined(__linux__)
+                    auto buffer = text(os::pipebuf, '\0');
+                    ok(::ttyname_r(os::stdout_fd, buffer.data(), buffer.size()), "::ttyname_r(os::stdout_fd)", os::unexpected);
+                    dtvt::tty_name = buffer.data();
+                    if (dtvt::tty_name.starts_with("/dev/tty"))
+                    {
+                        log("%%Linux console %tty%", prompt::tty, dtvt::tty_name);
+                        dtvt::vtmode |= ui::console::mouse;
+                        auto tty_word = "tty"sv;
+                        auto tty_pos = dtvt::tty_name.find(tty_word, 0);
+                        if (tty_pos != text::npos)
+                        {
+                            auto tty_number = dtvt::tty_name.substr(tty_pos + tty_word.size());
+                            dtvt::ttynum = utf::to_int(tty_number, 0);
+                        }
+                    }
+                    else
+                    {
+                        log("%%Pseudoterminal %pts%", prompt::tty, dtvt::tty_name);
+                    }
+                    if (term == "linux" || os::linux_console || colorterm == "kmscon")
+                    {
+                        dtvt::vtmode |= ui::console::mouse;
+                    }
+                #endif
                 if (colorterm != "truecolor" && colorterm != "24bit")
                 {
                     auto vt16colors = { // https://github.com//termstandard/colors
@@ -4689,6 +4718,191 @@ namespace netxs::os
                 }
             });
         }
+        #if defined(__linux__)
+        namespace libinput
+        {
+            struct libinput;
+            struct device;
+            struct event;
+            struct event_pointer;
+            struct fdinterface
+            {
+                using open_fx = si32(*)(char const* path, si32 flags, void* user_data);
+                using close_fx = void(*)(si32 fd, void* user_data);
+                open_fx  open_restricted;
+                close_fx close_restricted;
+            };
+            using log_handler_t = void(*)(libinput* libinput, si32 log_priority, char const* format, va_list args);
+
+            static auto path_create_context                      = (typeof(     libinput*(fdinterface*, void* user_data)             )*){};
+            static auto log_set_handler                          = (typeof(          void(libinput*, log_handler_t proc)             )*){};
+            static auto path_add_device                          = (typeof(       device*(libinput*, char const* path)               )*){};
+            static auto device_has_capability                    = (typeof(          si32(device*, si32 device_capability)           )*){};
+            static auto device_get_name                          = (typeof(   char const*(device*)                                   )*){};
+            static auto path_remove_device                       = (typeof(          void(device*)                                   )*){};
+            static auto device_config_tap_set_enabled            = (typeof(          si32(device*, si32 config_tap_state)            )*){};
+            static auto device_config_scroll_set_method          = (typeof(          si32(device*, si32 config_scroll_method)        )*){};
+            static auto get_fd                                   = (typeof(          si32(libinput*)                                 )*){};
+            static auto dispatch                                 = (typeof(          si32(libinput*)                                 )*){};
+            static auto get_event                                = (typeof(        event*(libinput*)                                 )*){};
+            static auto event_get_type                           = (typeof(          si32(event*)                                    )*){};
+            static auto event_get_pointer_event                  = (typeof(event_pointer*(event*)                                    )*){};
+            static auto event_pointer_get_absolute_x             = (typeof(          fp64(event_pointer*)                            )*){};
+            static auto event_pointer_get_absolute_y             = (typeof(          fp64(event_pointer*)                            )*){};
+            static auto event_pointer_get_dx                     = (typeof(          fp64(event_pointer*)                            )*){};
+            static auto event_pointer_get_dy                     = (typeof(          fp64(event_pointer*)                            )*){};
+            static auto event_pointer_get_button                 = (typeof(          ui32(event_pointer*)                            )*){};
+            static auto event_get_device                         = (typeof(       device*(event*)                                    )*){};
+            static auto event_pointer_get_button_state           = (typeof(          si32(event_pointer*)                            )*){};
+            static auto event_pointer_get_scroll_value           = (typeof(          fp64(event_pointer*, si32 libinput_pointer_axis))*){};
+            static auto event_destroy                            = (typeof(          void(event*)                                    )*){};
+            static auto unref                                    = (typeof(     libinput*(libinput*)                                 )*){};
+            static auto event_pointer_get_absolute_x_transformed = (typeof(          fp64(event_pointer*, ui32 width)                )*){};
+            static auto event_pointer_get_absolute_y_transformed = (typeof(          fp64(event_pointer*, ui32 width)                )*){};
+
+            static auto li = (libinput*)nullptr;
+            static auto li_ref = (void*)nullptr;
+
+            // libinput: .
+            auto initialize()
+            {
+                static constexpr auto& libinput_so = "libinput.so.10";
+                li_ref = ::dlopen(libinput_so, RTLD_NOW);
+                if (li_ref)
+                {
+                    *(void**)&path_create_context                      = ::dlsym(li_ref, "libinput_path_create_context");
+                    *(void**)&log_set_handler                          = ::dlsym(li_ref, "libinput_log_set_handler");
+                    *(void**)&path_add_device                          = ::dlsym(li_ref, "libinput_path_add_device");
+                    *(void**)&device_has_capability                    = ::dlsym(li_ref, "libinput_device_has_capability");
+                    *(void**)&device_get_name                          = ::dlsym(li_ref, "libinput_device_get_name");
+                    *(void**)&path_remove_device                       = ::dlsym(li_ref, "libinput_path_remove_device");
+                    *(void**)&device_config_tap_set_enabled            = ::dlsym(li_ref, "libinput_device_config_tap_set_enabled");
+                    *(void**)&device_config_scroll_set_method          = ::dlsym(li_ref, "libinput_device_config_scroll_set_method");
+                    *(void**)&get_fd                                   = ::dlsym(li_ref, "libinput_get_fd");
+                    *(void**)&dispatch                                 = ::dlsym(li_ref, "libinput_dispatch");
+                    *(void**)&get_event                                = ::dlsym(li_ref, "libinput_get_event");
+                    *(void**)&event_get_type                           = ::dlsym(li_ref, "libinput_event_get_type");
+                    *(void**)&event_get_pointer_event                  = ::dlsym(li_ref, "libinput_event_get_pointer_event");
+                    *(void**)&event_pointer_get_absolute_x             = ::dlsym(li_ref, "libinput_event_pointer_get_absolute_x");
+                    *(void**)&event_pointer_get_absolute_y             = ::dlsym(li_ref, "libinput_event_pointer_get_absolute_y");
+                    *(void**)&event_pointer_get_dx                     = ::dlsym(li_ref, "libinput_event_pointer_get_dx");
+                    *(void**)&event_pointer_get_dy                     = ::dlsym(li_ref, "libinput_event_pointer_get_dy");
+                    *(void**)&event_pointer_get_button                 = ::dlsym(li_ref, "libinput_event_pointer_get_button");
+                    *(void**)&event_get_device                         = ::dlsym(li_ref, "libinput_event_get_device");
+                    *(void**)&event_pointer_get_button_state           = ::dlsym(li_ref, "libinput_event_pointer_get_button_state");
+                    *(void**)&event_pointer_get_scroll_value           = ::dlsym(li_ref, "libinput_event_pointer_get_scroll_value");
+                    *(void**)&event_destroy                            = ::dlsym(li_ref, "libinput_event_destroy");
+                    *(void**)&dispatch                                 = ::dlsym(li_ref, "libinput_dispatch");
+                    *(void**)&unref                                    = ::dlsym(li_ref, "libinput_unref");
+                    *(void**)&event_pointer_get_absolute_x_transformed = ::dlsym(li_ref, "libinput_event_pointer_get_absolute_x_transformed");
+                    *(void**)&event_pointer_get_absolute_y_transformed = ::dlsym(li_ref, "libinput_event_pointer_get_absolute_y_transformed");
+
+                    static auto log_handler_proc = [](libinput*, si32 /*priority*/, char const* /*format*/, va_list /*args*/){ };
+                    static auto open_restricted  = [](char const* path, si32 flags, void* /*user_data*/){ return ::open(path, flags); };
+                    static auto close_restricted = [](fd_t fd, [[maybe_unused]]void* user_data){ ::close(fd); };
+                    static auto fd_interface = fdinterface{ .open_restricted = open_restricted, .close_restricted = close_restricted };
+
+                    li = path_create_context(&fd_interface, nullptr);
+                    log_set_handler(li, log_handler_proc);
+                }
+                else
+                {
+                    log("Error loading %libname% (%%)", libinput_so, errno);
+                }
+                return li;
+            }
+            // libinput: .
+            void uninitialize()
+            {
+                if (li_ref)
+                {
+                    if (li)
+                    {
+                        tty::libinput::unref(li);
+                    }
+                    ::dlclose(li_ref);
+                    li_ref = {};
+                }
+            }
+            auto next_event()
+            {
+                tty::libinput::dispatch(li);
+                auto e = tty::libinput::get_event(li);
+                return e;
+            }
+            void enumerate_mouses(auto proc)
+            {
+                auto code = std::error_code{};
+                auto events = fs::directory_iterator("/dev/input/", code);
+                if (!code)
+                for (auto& entry : events)
+                {
+                    if (entry.path().filename().string().starts_with("event"))
+                    {
+                        auto dev_path = entry.path().c_str();
+                        if (auto device = tty::libinput::path_add_device(li, dev_path))
+                        {
+                            if (tty::libinput::device_has_capability(device, LIBINPUT_DEVICE_CAP_POINTER))
+                            {
+                                auto name_ptr = tty::libinput::device_get_name(device);
+                                auto name = text{ name_ptr ? name_ptr : "unnamed" };
+                                proc(device, dev_path, name);
+                            }
+                            else
+                            {
+                                tty::libinput::path_remove_device(device);
+                            }
+                        }
+                    }
+                }
+            }
+            // libinput: Attach mouse devices to the libinput context.
+            auto attach_mouse()
+            {
+                log("%%Attaching mouse devices", prompt::os);
+                auto count = 0;
+                enumerate_mouses([&](auto device, auto dev_path, auto name)
+                {
+                    count++;
+                    log("\tadded device: %% (%%)", dev_path, name);
+                    auto rc = tty::libinput::device_config_tap_set_enabled(device, LIBINPUT_CONFIG_TAP_ENABLED);
+                    log("\t  LIBINPUT_CONFIG_TAP_ENABLED: ", rc);
+                    rc = tty::libinput::device_config_scroll_set_method(device, LIBINPUT_CONFIG_SCROLL_2FG);// | LIBINPUT_CONFIG_SCROLL_EDGE));
+                    log("\t   LIBINPUT_CONFIG_SCROLL_2FG: ", rc);
+                });
+                return count;
+            }
+            // libinput: Set mouse device access permissions for all users.
+            auto set_mouse_access()
+            {
+                if (!os::process::elevated)
+                {
+                    log("System-wide operations require elevated privileges.");
+                    return true;
+                }
+                auto count = 0;
+                initialize();
+                enumerate_mouses([&](auto /*device*/, auto dev_path, auto name)
+                {
+                    count++;
+                    if (-1 != ::chmod(dev_path, 0666))
+                    {
+                        log("\tSet access bits 0666 for '%%' (%%)", dev_path, name);
+                    }
+                    else
+                    {
+                        log("\tFailed to set access bits 0666 for '%%' (%%)", dev_path, name);
+                    }
+                });
+                if (!count)
+                {
+                    log("\tNo mouse devices found");
+                }
+                uninitialize();
+                return !count;
+            }
+        }
+        #endif
         void direct(auto& extio)
         {
             auto& intio = *dtvt::client;
@@ -4993,75 +5207,68 @@ namespace netxs::os
                 auto micefd = os::invalid_fd;
                 auto buffer = text(os::pipebuf, '\0');
                 auto sig_fd = os::signals::fd{};
-                #if defined(__linux__)
-                auto ttynum = si32{ 0 };
-                #endif
                 auto get_kb_state = []
                 {
                     auto state = si32{ 0 };
                     #if defined(__linux__)
                         auto shift_state = si32{ 6 /*TIOCL_GETSHIFTSTATE*/ };
-                        ok(::ioctl(os::stdin_fd, TIOCLINUX, &shift_state), "::ioctl(os::stdin_fd, TIOCLINUX)", os::unexpected);
-                        auto lalt   = shift_state & (1 << KG_ALT   );
-                        auto ralt   = shift_state & (1 << KG_ALTGR );
-                        auto ctrl   = shift_state & (1 << KG_CTRL  );
-                        auto rctrl  = shift_state & (1 << KG_CTRLR );
-                        auto lctrl  = shift_state & (1 << KG_CTRLL ) || (!rctrl && ctrl);
-                        auto shift  = shift_state & (1 << KG_SHIFT );
-                        auto rshift = shift_state & (1 << KG_SHIFTR);
-                        auto lshift = shift_state & (1 << KG_SHIFTL) || (!rshift && shift);
-                        if (lalt  ) state |= input::hids::LAlt;
-                        if (ralt  ) state |= input::hids::RAlt;
-                        if (lctrl ) state |= input::hids::LCtrl;
-                        if (rctrl ) state |= input::hids::RCtrl;
-                        if (lshift) state |= input::hids::LShift;
-                        if (rshift) state |= input::hids::RShift;
-                        auto led_state = si32{};
-                        ok(::ioctl(os::stdin_fd, KDGKBLED, &led_state), "::ioctl(os::stdin_fd, KDGKBLED)", os::unexpected);
-                        // CapsLock can always be 0 due to poorly coded drivers.
-                        if (led_state & LED_NUM) state |= input::hids::NumLock;
-                        if (led_state & LED_CAP) state |= input::hids::CapsLock;
-                        if (led_state & LED_SCR) state |= input::hids::ScrlLock;
+                        if (-1 != ::ioctl(os::stdin_fd, TIOCLINUX, &shift_state))
+                        {
+                            _k0 = shift_state;
+                            _k1 = 0;
+                            auto lalt   = shift_state & (1 << KG_ALT   );
+                            auto ralt   = shift_state & (1 << KG_ALTGR );
+                            auto ctrl   = shift_state & (1 << KG_CTRL  );
+                            auto rctrl  = shift_state & (1 << KG_CTRLR );
+                            auto lctrl  = shift_state & (1 << KG_CTRLL ) || (!rctrl && ctrl);
+                            auto shift  = shift_state & (1 << KG_SHIFT );
+                            auto rshift = shift_state & (1 << KG_SHIFTR);
+                            auto lshift = shift_state & (1 << KG_SHIFTL) || (!rshift && shift);
+                            if (lalt  ) state |= input::hids::LAlt;
+                            if (ralt  ) state |= input::hids::RAlt;
+                            if (lctrl ) state |= input::hids::LCtrl;
+                            if (rctrl ) state |= input::hids::RCtrl;
+                            if (lshift) state |= input::hids::LShift;
+                            if (rshift) state |= input::hids::RShift;
+                        }
+                        else
+                        {
+                            _k0 = -1;
+                            _k1 = errno;
+                        }
+                        auto led_state = si32{ 0 };
+                        if (-1 != ::ioctl(os::stdin_fd, KDGKBLED, &led_state))
+                        {
+                            _k2 = led_state;
+                            _k3 = 0;
+                            // CapsLock can always be 0 due to poorly coded drivers.
+                            if (led_state & LED_NUM) state |= input::hids::NumLock;
+                            if (led_state & LED_CAP) state |= input::hids::CapsLock;
+                            if (led_state & LED_SCR) state |= input::hids::ScrlLock;
+                        }
+                        else
+                        {
+                            _k2 = -1;
+                            _k3 = errno;
+                        }
                     #endif
                     return state;
                 };
-                ok(::ttyname_r(os::stdout_fd, buffer.data(), buffer.size()), "::ttyname_r(os::stdout_fd)", os::unexpected);
-                auto tty_name = view(buffer.data());
-                if (!os::linux_console)
-                {
-                    log(prompt::tty, "Pseudoterminal ", tty_name);
-                }
                 #if defined(__linux__)
-                else // Trying to get direct access to a PS/2 mouse.
+                if (dtvt::vtmode & ui::console::mouse) // Trying to get direct mouse access.
                 {
-                    log("%%Linux console %tty%", prompt::tty, tty_name);
-                    auto imps2_string = "\xf3\xc8\xf3\x64\xf3\x50"sv;
-                    auto mouse_device = "/dev/input/mice";
-                    auto mouse_shadow = "/dev/input/mice.vtm";
-                    auto fd = ::open(mouse_device, O_RDWR);
-                    if (fd == -1) fd = ::open(mouse_shadow, O_RDWR);
-                    if (fd == -1) log("%%Error opening %mouse_device% and %mouse_shadow%, error %code%%desc%", prompt::tty, mouse_device, mouse_shadow, errno, errno == 13 ? " - permission denied" : "");
-                    else if (io::send(fd, imps2_string))
+                    if (auto li = os::tty::libinput::initialize())
                     {
-                        auto ack = char{};
-                        io::recv(fd, &ack, sizeof(ack));
-                        micefd = fd;
-                        auto tty_word = tty_name.find("tty", 0);
-                        if (tty_word != text::npos)
+                        auto dev_count = os::tty::libinput::attach_mouse();
+                        if (dev_count)
                         {
-                            auto tty_number = tty_name.substr(tty_word + 3/*skip tty letters*/);
-                            if (auto cur_tty = utf::to_int(tty_number))
-                            {
-                                ttynum = cur_tty.value();
-                            }
+                            micefd = libinput::get_fd(li);
                         }
-                        if (ack == '\xfa') log(prompt::tty, "ImPS/2 mouse connected");
-                        else               log(prompt::tty, "Unknown PS/2 mouse connected, ack: ", utf::to_hex_0x((int)ack));
-                    }
-                    else
-                    {
-                        log(prompt::tty, "No PS/2 mouse detected");
-                        os::close(fd);
+                        else
+                        {
+                            log("%%No mouse devices found", prompt::os);
+                            os::tty::libinput::uninitialize();
+                        }
                     }
                 }
                 #endif
@@ -5252,6 +5459,22 @@ namespace netxs::os
                         { "\033[21~"  , { "",     key::F10                               }},
                         { "\033[23~"  , { "",     key::F11                               }},
                         { "\033[24~"  , { "",     key::F12                               }},
+                        // Linux VGA Console special keys.
+                        { "\033[1~"   , { "",     key::KeyHome                           }},
+                        { "\033[4~"   , { "",     key::KeyEnd                            }},
+                        { "\033[[A"   , { "",     key::F1                                }},
+                        { "\033[[B"   , { "",     key::F2                                }},
+                        { "\033[[C"   , { "",     key::F3                                }},
+                        { "\033[[D"   , { "",     key::F4                                }},
+                        { "\033[[E"   , { "",     key::F5                                }},
+                        { "\033[25~"  , { "",     key::F1            | hids::LShift << 8 }},
+                        { "\033[26~"  , { "",     key::F2            | hids::LShift << 8 }},
+                        { "\033[28~"  , { "",     key::F3            | hids::LShift << 8 }},
+                        { "\033[29~"  , { "",     key::F4            | hids::LShift << 8 }},
+                        { "\033[31~"  , { "",     key::F5            | hids::LShift << 8 }},
+                        { "\033[32~"  , { "",     key::F6            | hids::LShift << 8 }},
+                        { "\033[33~"  , { "",     key::F7            | hids::LShift << 8 }},
+                        { "\033[34~"  , { "",     key::F8            | hids::LShift << 8 }},
                     };
 
                     for (auto i = 1; i < 8; i++)
@@ -5508,24 +5731,25 @@ namespace netxs::os
                                     case 2: netxs::set_bit<input::hids::buttons::right >(m.buttons, ispressed); break;
                                     case 64:
                                         m.wheelfp = 1;
-                                        m.wheelsi = 1;
                                         break;
                                     case 65:
                                         m.wheelfp = -1;
-                                        m.wheelsi = -1;
                                         break;
                                     case 66:
                                         m.hzwheel = true;
                                         m.wheelfp = 1;
-                                        m.wheelsi = 1;
                                         break;
                                     case 67:
                                         m.hzwheel = true;
                                         m.wheelfp = -1;
-                                        m.wheelsi = -1;
                                         break;
                                     //todo impl ext mouse buttons 129-131
                                 }
+                                if (!(dtvt::vtmode & ui::console::vt_2D)) // Don't accelerate the mouse wheel if we are already inside the vtm.
+                                {
+                                    m.wheelfp *= dtvt::wheelrate;
+                                }
+                                m.wheelsi = (si32)m.wheelfp;
                                 m.changed++;
                                 m.timecod = timecode;
                                 mouse(m);
@@ -5600,36 +5824,138 @@ namespace netxs::os
                     }
                     else alive = faux;
                 };
-                auto m_proc = [&, mcoord = twod{}]() mutable
+                static constexpr auto scale = twod{ 8, 16 }; // Linux VGA cell size.
+                auto m_proc = [&, mcoord = fp2d{ w.winsize * scale / 2 }/*centrify mouse coord*/,
+                                  whlacc = fp2d{},
+                                  dev_map = std::unordered_map<arch, si32>{}]() mutable
                 {
-                    auto data = io::recv(micefd, buffer);
-                    auto size = data.size();
-                    if (size == 4 /* ImPS/2 */
-                     || size == 3 /* PS/2 compatibility mode */)
-                    {
                     #if defined(__linux__)
-                        auto vt_state = ::vt_stat{};
-                        ok(::ioctl(os::stdout_fd, VT_GETSTATE, &vt_state), "::ioctl(VT_GETSTATE)", os::unexpected);
-                        if (vt_state.v_active == ttynum) // Proceed current active tty only.
+                    while (true)
+                    {
+                        if (auto e = os::tty::libinput::next_event())
                         {
-                            auto scale = twod{ 6, 12 }; //todo magic numbers
-                            auto limit = w.winsize * scale;
-                            auto bttns = data[0] & 7;
-                            mcoord.x  += data[1];
-                            mcoord.y  -= data[2];
-                            mcoord = std::clamp(mcoord, dot_00, limit - dot_11);
-                            k.ctlstat = get_kb_state();
-                            m.wheelfp = size == 4 ? -data[3] : 0;
-                            m.wheelsi = m.wheelfp;
-                            m.coordxy = { mcoord / scale };
-                            m.buttons = bttns;
-                            m.ctlstat = k.ctlstat;
-                            m.timecod = datetime::now();
-                            m.changed++;
-                            mouse(m);
+                            auto wheelfp = fp2d{};
+                            auto wheelsi = twod{};
+                            auto event_type = libinput::event_get_type(e);
+                            auto p = libinput::event_get_pointer_event(e);
+                            if (event_type == LIBINPUT_EVENT_POINTER_MOTION_ABSOLUTE) // Generic PS/2 mouse.
+                            {
+                                auto limit = w.winsize * scale;
+                                mcoord.x = libinput::event_pointer_get_absolute_x_transformed(p, limit.x);
+                                mcoord.y = libinput::event_pointer_get_absolute_y_transformed(p, limit.y);
+                            }
+                            else if (event_type == LIBINPUT_EVENT_POINTER_MOTION) // Touchpads and USB mouses.
+                            {
+                                auto limit = fp2d{ w.winsize * scale };
+                                mcoord.x += libinput::event_pointer_get_dx(p);
+                                mcoord.y += libinput::event_pointer_get_dy(p);
+                                mcoord = std::clamp(mcoord, fp2d{}, limit - dot_11);
+                            }
+                            else if (event_type == LIBINPUT_EVENT_POINTER_BUTTON)
+                            {
+                                auto button = libinput::event_pointer_get_button(p);
+                                auto i = -1;
+                                switch (button)
+                                {
+                                    case BTN_LEFT:    i = 0; break;
+                                    case BTN_RIGHT:   i = 1; break;
+                                    case BTN_MIDDLE:  i = 2; break;
+                                    case BTN_SIDE:    i = 3; break;
+                                    case BTN_EXTRA:   i = 4; break;
+                                    case BTN_FORWARD: i = 5; break;
+                                    case BTN_BACK:    i = 6; break;
+                                    case BTN_TASK:    i = 7; break;
+                                }
+                                if (i != -1)
+                                {
+                                    auto dev_ptr = libinput::event_get_device(e);
+                                    auto pressed = libinput::event_pointer_get_button_state(p);
+                                    auto& state = dev_map[(arch)dev_ptr];
+                                    state = (state & ~(1 << i)) | (pressed << i);
+                                }
+                            }
+                            else
+                            {
+                                if (event_type == LIBINPUT_EVENT_POINTER_SCROLL_WHEEL)
+                                {
+                                    wheelfp.x = -libinput::event_pointer_get_scroll_value(p, LIBINPUT_POINTER_AXIS_SCROLL_HORIZONTAL);
+                                    wheelfp.y = -libinput::event_pointer_get_scroll_value(p, LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL);
+                                }
+                                else if (event_type == LIBINPUT_EVENT_POINTER_SCROLL_FINGER)
+                                {
+                                    wheelfp.x = libinput::event_pointer_get_scroll_value(p, LIBINPUT_POINTER_AXIS_SCROLL_HORIZONTAL);
+                                    wheelfp.y = libinput::event_pointer_get_scroll_value(p, LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL);
+                                }
+                                if (wheelfp)
+                                {
+                                    if (dtvt::wheelrate) wheelfp /= dtvt::wheelrate;
+                                    if (whlacc.x * wheelfp.x < 0 || whlacc.y * wheelfp.y < 0) // Reset accum if direction has changed.
+                                    {
+                                        whlacc = {};
+                                    }
+                                    whlacc += wheelfp;
+                                    wheelsi = whlacc ;
+                                    if (wheelsi.x) whlacc.x -= (fp32)wheelsi.x;
+                                    if (wheelsi.y) whlacc.y -= (fp32)wheelsi.y;
+                                }
+                            }
+                            auto bttns = 0;
+                            for (auto& [id, state] : dev_map)
+                            {
+                                bttns |= state;
+                            }
+                            auto vt_state = ::vt_stat{};
+                            ::ioctl(os::stdout_fd, VT_GETSTATE, &vt_state);
+                            if (vt_state.v_active == dtvt::ttynum) // Proceed only if the current tty is active.
+                            {
+                                auto kbmod = get_kb_state();
+                                if (k.ctlstat != kbmod)
+                                {
+                                    k.ctlstat = kbmod;
+                                    m.ctlstat = kbmod;
+                                }
+                                m.coordxy = mcoord / scale;
+                                m.buttons = bttns;
+                                m.ctlstat = k.ctlstat;
+                                if (wheelfp)
+                                {
+                                    if (wheelfp.x)
+                                    {
+                                        m.wheelfp = wheelfp.x;
+                                        m.wheelsi = wheelsi.x;
+                                        m.hzwheel = true;
+                                        m.timecod = datetime::now();
+                                        m.changed++;
+                                        mouse(m);
+                                    }
+                                    if (wheelfp.y)
+                                    {
+                                        m.wheelfp = wheelfp.y;
+                                        m.wheelsi = wheelsi.y;
+                                        m.hzwheel = faux;
+                                        m.timecod = datetime::now();
+                                        m.changed++;
+                                        mouse(m);
+                                    }
+                                }
+                                else
+                                {
+                                    m.wheelfp = {};
+                                    m.wheelsi = {};
+                                    m.hzwheel = {};
+                                    m.timecod = datetime::now();
+                                    m.changed++;
+                                    mouse(m);
+                                }
+                            }
+                            libinput::event_destroy(e);
                         }
-                    #endif
+                        else
+                        {
+                            break;
+                        }
                     }
+                    #endif
                 };
                 auto s_proc = [&]
                 {
@@ -5660,8 +5986,9 @@ namespace netxs::os
                                micefd,       m_proc,
                                alarm,        f_proc);
                 }
-
-                os::close(micefd);
+                #if defined(__linux__)
+                os::tty::libinput::uninitialize();
+                #endif
 
             #endif
 
@@ -5860,7 +6187,10 @@ namespace netxs::os
                 auto& extio = *stdio;
                 tty::direct(extio);
             }
-            else tty::legacy();
+            else
+            {
+                tty::legacy();
+            }
         }
 
         struct readline
