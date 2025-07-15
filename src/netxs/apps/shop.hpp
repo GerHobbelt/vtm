@@ -1,13 +1,13 @@
-// Copyright (c) NetXS Group.
+// Copyright (c) Dmitry Sapozhnikov
 // Licensed under the MIT license.
 
 #pragma once
 
 namespace netxs::events::userland
 {
-    struct shop
+    namespace shop
     {
-        EVENTPACK( shop, netxs::events::userland::root::custom )
+        EVENTPACK( netxs::events::userland::root::custom )
         {
             GROUP_XS( ui, input::hids ),
 
@@ -22,16 +22,16 @@ namespace netxs::events::userland
                 };
             };
         };
-    };
+    }
 }
 
-// shop: Desktopio App Store.
+// shop: App manager.
 namespace netxs::app::shop
 {
     static constexpr auto id = "gems";
-    static constexpr auto desc = "Desktopio App Manager (DEMO)";
+    static constexpr auto name = "Application Distribution Hub (DEMO)";
 
-    using events = netxs::events::userland::shop;
+    namespace events = netxs::events::userland::shop;
 
     namespace
     {
@@ -53,7 +53,7 @@ namespace netxs::app::shop
                 auto line = ansi::wrp(wrap::off).add("──────────────────────────────────────────────────────────────────────────────────────").wrp(wrap::on).eol();
                 auto item = [](auto app, auto clr, auto rating, auto price, auto buy, auto desc)
                 {
-                    auto clr_light = rgba{ clr };
+                    auto clr_light = argb{ clr };
                     clr_light.mix(0xa7ffffff);
 
                     auto lot = ansi::nil()
@@ -79,9 +79,8 @@ namespace netxs::app::shop
 
                 appstore_head =
                 ansi::nil().eol().mgl(2).mgr(2)
-                .bld(faux).fgc(whitelt).jet(bias::left).wrp(wrap::on).add(
-                "Desktopio Application Distribution Platform that allows "
-                "users to browse and download software.\n\n");
+                .bld(true).fgc(whitelt).jet(bias::left).wrp(wrap::on)
+                .add("Application Distribution Hub").bld(faux).add("\n\n");
 
                 auto textancy_text = ansi::nil().add(
                 "Hello World!😎\n"
@@ -95,40 +94,37 @@ namespace netxs::app::shop
                     "Virtual Terminal."),
 
                     item("Tile", bluedk, "3", "Free ", "Get",
-                    "Meta object. Tiling window manager."),
+                    "Tiling window manager."),
 
                     item("Text", cyandk, "102", "Free ", "Get",
-                    "A simple text editor for Desktopio environment "
-                    "and a basic editing tool which enables "
-                    "desktop users to create documents that "
-                    "contain ANSI-formatted text."),
+                    "Text editor for text-based desktop environment. "
+                    "Basic editing tool which allows "
+                    "desktop users to create documents containing rich text."),
 
                     item("Calc", greendk, "30", "Free ", "Get",
-                    "A simple spreadsheet calculator application."),
+                    "Spreadsheet calculator."),
 
                     item("Task", magentadk, "311", "Free ", "Get",
-                    "A task manager program that displays "
+                    "Task manager that displays "
                     "information about CPU, memory utilization, "
                     "and current I/O usage."),
 
                     item("Draw", reddk, "64", "Free ", "Get",
-                    "A simple program which enables desktop "
-                    "users to create sophisticated ANSI-artworks."),
+                    "ANSI-artwork Studio."),
 
                     item("Char", yellowdk, "161", "Free ", "Get",
-                    "An utility that allows browsing all Unicode "
-                    "codepoints and inspecting their metadata."),
+                    "Unicode codepoints browser."),
 
-                    item(ansi::fgc(0xFFff0000).add("File"), cyanlt, "4", "Free ", "Get",
-                    "An orthodox file manager for Desktopio environment."),
+                    item(ansi::fgc(0xFF0000ff).add("File"), cyanlt, "4", "Free ", "Get",
+                    "File manager."),
 
                     item("Time", bluedk, "4", "Free ", "Get",
-                    "A calendar application for Desktopio environment."),
+                    "Calendar."),
 
                     item("Goto", bluedk, "4", "Free ", "Get",
                     "Internet/SSH browser."),
 
-                    item(ansi::fgc(0xFF00FFFF).add("Doom").fgc(), reddk, "4", "Free ", "Get",
+                    item(ansi::fgc(0xFFFFFF00).add("Doom").fgc(), reddk, "4", "Free ", "Get",
                     "Doom II source port."),
 
                     item("Clip", bluedk, "1", "Free ", "Get",
@@ -141,10 +137,10 @@ namespace netxs::app::shop
                     "Workspace settings configurator."),
 
                     item("View", cyandk, "1", "Free ", "Get",
-                    "Meta object. Workspace location marker."),
+                    "Workspace location marker."),
                 };
 
-                auto qr = ansi::esc(
+                auto qr = escx(
                 "\033[107m                                 \n"
                 "  \033[40m \033[97m▄▄▄▄▄ \033[107m \033[30m▄\033[40;97m▄\033[107m \033[30m▄\033[40m \033[107m  \033[40m \033[97m▄\033[107;30m▄\033[40;97m▄▄\033[107m  \033[40m ▄▄▄▄▄ \033[107m  \n"
                 "  \033[40m \033[107m \033[40m   \033[107m \033[40m \033[107m \033[40m▄   ▄\033[107m \033[40m \033[107;30m▄ \033[40m \033[107m▄\033[40;97m▄\033[107m  \033[40m \033[107m \033[40m   \033[107m \033[40m \033[107m  \n"
@@ -167,11 +163,11 @@ namespace netxs::app::shop
                 .mgl(2).mgr(2).wrp(wrap::off)
                 .fgc(bluedk).jet(bias::left)
                 .bgc(bluedk).fgc(0xFFFFFFFF)
-                .add(" Desktopio Environment "
+                .add(" Text-based Desktop Environment "
                 "\n\n")
                 .fgc().bgc().jet(bias::left).wrp(wrap::on).add(
-                "Desktopio Environment is a cross-platform, full-featured desktop environment."
-                " A user interface where by all output is presented in the form of text.\n"
+                "A text-based desktop environment is an environment "
+                "in which the entire user interface is presented using text output.\n"
                 "The first biggest advantage of this concept that "
                 "it can be used directly over SSH connections, no additional protocol needed.\n"
                 "The second is the flexible multi-user interface "
@@ -189,50 +185,55 @@ namespace netxs::app::shop
             return std::tuple{ appstore_head, appstore_body, desktopio_body };
         };
 
-        auto build = [](text cwd, text arg, xmls& config, text patch)
+        auto build = [](eccc /*appcfg*/, xmls& config)
         {
-            auto highlight_color = skin::color(tone::highlight);
+            auto highlight_color = skin::color(tone::winfocus);
             auto c3 = highlight_color;
-            auto x3 = cell{ c3 }.alpha(0x00);
+            //auto x3 = cell{ c3 }.alpha(0x00);
 
             auto [appstore_head, appstore_body, desktopio_body] = get_text();
             auto window = ui::cake::ctor();
             window->plugin<pro::focus>(pro::focus::mode::focused)
                   ->colors(whitelt, 0x60000000)
-                  ->plugin<pro::track>()
+                  ->plugin<pro::keybd>("defapp")
                   ->plugin<pro::acryl>()
                   ->plugin<pro::cache>()
                   ->invoke([](auto& boss)
                   {
-                        //boss.keybd.accept(true);
-                        boss.LISTEN(tier::anycast, e2::form::quit, item)
+                        boss.LISTEN(tier::anycast, e2::form::proceed::quit::any, fast)
                         {
-                            boss.RISEUP(tier::release, e2::form::quit, item);
+                            boss.base::riseup(tier::release, e2::form::proceed::quit::one, fast);
                         };
                   });
             auto object = window->attach(ui::fork::ctor(axis::Y))
                                 ->colors(whitelt, 0);
                 auto menu_object = object->attach(slot::_1, ui::fork::ctor(axis::Y));
-                    config.cd("/config/gems/", "/config/defapp/");
+                    config.cd("/config/defapp");
                     auto [menu_block, cover, menu_data] = app::shared::menu::create(config, {});
                     menu_object->attach(slot::_1, menu_block);
                     menu_object->attach(slot::_2, ui::post::ctor())
-                               ->plugin<pro::limit>(twod{ 37,-1 }, twod{ -1,-1 })
                                ->upload(appstore_head)
                                ->active();
                 auto layers = object->attach(slot::_2, ui::cake::ctor());
                     auto scroll = layers->attach(ui::rail::ctor())
-                                        ->colors(whitedk, 0xFF0f0f0f)
-                                        ->plugin<pro::limit>(twod{ -1,2 }, twod{ -1,-1 });
+                                        ->active(whitedk, 0xFF0f0f0f)
+                                        ->limits({ -1,-1 }, { -1,-1 });
                         auto items = scroll->attach(ui::list::ctor());
                         for (auto& body : appstore_body) items->attach(ui::post::ctor())
                                                               ->upload(body)
+                                                              ->active()
+                                                              ->plugin<pro::focus>()
                                                               ->plugin<pro::grade>()
-                                                              ->plugin<pro::fader>(x3, c3, 250ms);
+                                                              ->shader(cell::shaders::xlight, e2::form::state::hover)
+                                                              ->shader(cell::shaders::color(c3), e2::form::state::focus::count);
                         items->attach(ui::post::ctor())
                              ->upload(desktopio_body)
                              ->plugin<pro::grade>();
                 layers->attach(app::shared::scroll_bars(scroll));
+            window->invoke([&](auto& boss)
+            {
+                app::shared::base_kb_navigation(config, scroll, boss);
+            });
             return window;
         };
     };

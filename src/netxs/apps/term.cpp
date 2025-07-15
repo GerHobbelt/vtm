@@ -1,4 +1,4 @@
-// Copyright (c) NetXS Group.
+// Copyright (c) Dmitry Sapozhnikov
 // Licensed under the MIT license.
 
 #include "term.hpp"
@@ -8,17 +8,15 @@ using namespace netxs;
 int main(int argc, char* argv[])
 {
     auto defaults = 
-    #include "term.xml"
+    #include "../vtm.xml"
 
-    auto vtmode = os::tty::vtmode();
-    auto syslog = os::tty::logger(vtmode);
-    auto banner = [&]{ log(app::term::desc, ' ', app::shared::version); };
+    os::dtvt::initialize();
+    auto syslog = os::tty::logger();
+    auto banner = []{ log(app::terminal::name, ' ', app::shared::version); };
     auto cfonly = faux;
     auto cfpath = text{};
     auto errmsg = text{};
     auto getopt = os::process::args{ argc, argv };
-    auto params = app::term::id + " "s + getopt.rest();
-    getopt.reset();
     while (getopt)
     {
         if (getopt.match("-l", "--listconfig"))
@@ -30,13 +28,13 @@ int main(int argc, char* argv[])
             cfpath = getopt.next();
             if (cfpath.empty())
             {
-                errmsg = "config file path not specified";
+                errmsg = "Config file path not specified";
                 break;
             }
         }
         else if (getopt.match("-?", "-h", "--help"))
         {
-            errmsg = ansi::nil().add("show help message");
+            errmsg = ansi::nil().add("Show help message");
             break;
         }
         else if (getopt.match("-v", "--version"))
@@ -50,44 +48,35 @@ int main(int argc, char* argv[])
         }
         else
         {
-            errmsg = utf::concat("unknown option '", getopt.next(), "'");
+            errmsg = utf::concat("Unknown option '", getopt.next(), "'");
             break;
         }
     }
+    auto params = getopt.rest();
 
     banner();
     if (errmsg.size())
     {
         os::fail(errmsg);
-        auto myname = os::process::binary<true>();
-        log("\nTerminal emulator.\n\n"s
-            + "  Syntax:\n\n    " + myname + " [ -c <file> ] [ -l ]\n"s
-            + "\n"s
-            + "  Options:\n\n"s
-            + "    No arguments        Run application.\n"s
-            + "    -c | --config <..>  Use specified configuration file.\n"s
-            + "    -l | --listconfig   Show configuration and exit.\n"s
-            + "\n"s
-            + "  Configuration precedence (descending priority):\n\n"s
-            + "    1. Command line options: " + myname + " -c path/to/settings.xml\n"s
-            + "    2. Environment variable: "s + app::shared::env_config.substr(1) + "=path/to/settings.xml\n"s
-            + "    3. Hardcoded location \""s  + app::shared::usr_config + "\"\n"s
-            + "    4. Hardcoded configuration\n"s);
+        log("\n"
+            "\n  Syntax:"
+            "\n"
+            "\n    " + os::process::binary<true>() + " [ -c <file> ][ -l ]"
+            "\n"
+            "\n  Options:"
+            "\n"
+            "\n    No arguments         Run application."
+            "\n    -c, --config <file>  Specifies the settings file to load."
+            "\n    -l, --listconfig     Print configuration."
+            "\n");
     }
     else if (cfonly)
     {
-        log("Running configuration:\n", app::shared::load::settings<true>(defaults, cfpath, os::dtvt::config()));
+        log(prompt::resultant_settings, "\n", app::shared::load::settings<true>(defaults, cfpath, os::dtvt::config));
     }
     else
     {
-        auto config = app::shared::load::settings(defaults, cfpath, os::dtvt::config());
-        auto result = app::shared::start(params, app::term::id, vtmode, config);
-
-        if (result) return 0;
-        else
-        {
-            log("main: app initialization error");
-            return 1;
-        }
+        auto config = app::shared::load::settings(defaults, cfpath, os::dtvt::config);
+        app::shared::start(params, app::terminal::id, config);
     }
 }

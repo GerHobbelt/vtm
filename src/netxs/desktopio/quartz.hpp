@@ -1,4 +1,4 @@
-// Copyright (c) NetXS Group.
+// Copyright (c) Dmitry Sapozhnikov
 // Licensed under the MIT license.
 
 #pragma once
@@ -26,13 +26,13 @@ namespace netxs::datetime
     template<class T, class degree = std::chrono::milliseconds>
     T round(time t)
     {
-        return clamp<T>(std::chrono::duration_cast<degree>(t.time_since_epoch()).count());
+        return netxs::saturate_cast<T>(std::chrono::duration_cast<degree>(t.time_since_epoch()).count());
     }
     // quartz: Round a chrono time period in degree (def: milliseconds).
     template<class T, class degree = std::chrono::milliseconds>
     T round(span t)
     {
-        return clamp<T>(std::chrono::duration_cast<degree>(t).count());
+        return netxs::saturate_cast<T>(std::chrono::duration_cast<degree>(t).count());
     }
 
     // quartz: Return a total count degree unts (def: milliseconds) since epoch.
@@ -44,29 +44,59 @@ namespace netxs::datetime
     // quartz: Return current moment.
     auto now()
     {
-        return std::chrono::steady_clock::now();
+        return std::chrono::steady_clock::now(); // Note: steady_clock does not contain the current time (it is a monotonic clock).
+    }
+    // quartz: Return unique ui64 id.
+    auto uniqueid()
+    {
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(now().time_since_epoch()).count();
+    }
+    auto breakdown(span t)
+    {
+        auto days         = datetime::round<ui32, std::chrono::        days>(t);
+        auto hours        = datetime::round<ui32, std::chrono::       hours>(t -= std::chrono::   days{ days    });
+        auto minutes      = datetime::round<ui32, std::chrono::     minutes>(t -= std::chrono::  hours{ hours   });
+        auto seconds      = datetime::round<ui32, std::chrono::     seconds>(t -= std::chrono::minutes{ minutes });
+        auto milliseconds = datetime::round<ui32, std::chrono::milliseconds>(t -= std::chrono::seconds{ seconds });
+        return std::tuple{ days, hours, minutes, seconds, milliseconds };
+    }
+    auto breakdown(time t)
+    {
+        auto d = t.time_since_epoch();
+        auto hours        = datetime::round<ui32, std::chrono::       hours>(d);
+        auto minutes      = datetime::round<ui32, std::chrono::     minutes>(d -= std::chrono::       hours{ hours        });
+        auto seconds      = datetime::round<ui32, std::chrono::     seconds>(d -= std::chrono::     minutes{ minutes      });
+        auto milliseconds = datetime::round<ui32, std::chrono::milliseconds>(d -= std::chrono::     seconds{ seconds      });
+        auto microseconds = datetime::round<ui32, std::chrono::microseconds>(d -= std::chrono::milliseconds{ milliseconds });
+        return std::tuple{ hours % 24, minutes, seconds, milliseconds, microseconds };
+    }
+    auto milliseconds(time t)
+    {
+        auto period = t.time_since_epoch();
+        auto seconds = std::chrono::duration_cast<std::chrono::seconds>(period).count();
+        auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(period -= std::chrono::seconds{ seconds });
+        return milliseconds;
     }
 
-    template<class Reactor, class Context>
+    template<class T>
     class quartz
     {
         using cond = std::condition_variable;
         using work = std::thread;
 
-        Reactor & alarm;
-        Context   cause;
-        bool      alive;
-        bool      letup;
-        span      delay;
-        span      pulse;
-        work      fiber;
-        cond      synch;
-        span      watch;
+        T&   owner;
+        flag alive;
+        flag letup;
+        span delay;
+        span watch;
+        span pulse;
+        work fiber;
+        cond synch;
 
         void worker()
         {
             auto mutex = std::mutex{};
-            auto lock = std::unique_lock{ mutex };
+            auto guard = std::unique_lock{ mutex };
 
             auto now = datetime::now();
             auto prior = now;
@@ -77,27 +107,24 @@ namespace netxs::datetime
                 prior =  now;
 
                 now = datetime::now();
-                alarm.notify(cause, now);
+                owner.timer(now);
 
-                if (letup)
+                if (letup.exchange(faux))
                 {
-                    synch.wait_for(lock, delay);
-
+                    synch.wait_for(guard, delay);
                     delay = span::zero();
-                    letup = faux;
                 }
                 else
                 {
                     auto trail = pulse - now.time_since_epoch() % pulse;
-                    synch.wait_for(lock, trail);
+                    synch.wait_for(guard, trail);
                 }
             }
         }
 
     public:
-        quartz(Reactor& router, Context cause)
-            : alarm{ router       },
-              cause{ cause        },
+        quartz(T& owner)
+            : owner{ owner        },
               alive{ faux         },
               letup{ faux         },
               delay{ span::zero() },
@@ -109,17 +136,15 @@ namespace netxs::datetime
         {
             return alive;
         }
-        void ignite(span const& interval)
+        void ignite(span interval)
         {
             pulse = interval;
-
-            if (!alive)
+            if (!alive.exchange(true))
             {
-                alive = true;
                 fiber = std::thread{ &quartz::worker, this };
             }
         }
-        void ignite(int frequency)
+        void ignite(si32 frequency)
         {
             ignite(span{ span::period::den / frequency });
         }
@@ -128,7 +153,7 @@ namespace netxs::datetime
             delay = pause2;
             letup = true;
         }
-        bool stopwatch(span const& p)
+        bool stopwatch(span p)
         {
             if (watch > p)
             {
@@ -140,19 +165,16 @@ namespace netxs::datetime
                 return faux;
             }
         }
-        void cancel()
+        void stop()
         {
-            alive = faux;
-            synch.notify_all();
-
-            if (fiber.joinable())
+            if (alive.exchange(faux))
             {
-                fiber.join();
+                synch.notify_all();
+                if (fiber.joinable())
+                {
+                    fiber.join();
+                }
             }
-        }
-       ~quartz()
-        {
-            cancel();
         }
     };
 
@@ -182,9 +204,9 @@ namespace netxs::datetime
         span period; // tail: Period of time to be stored.
         span minint; // tail: The minimal period of time between the records stored.
 
-        tail(span const& period = 75ms, span const& minint = 4ms) //todo unify the minint=1/fps
-            : size{ 1 },
-              iter{ 0 },
+        tail(span period = 75ms, span minint = 4ms) //todo unify the minint=1/fps
+            : iter{ 0 },
+              size{ 1 },
               period{ period },
               minint{ minint }
         {
