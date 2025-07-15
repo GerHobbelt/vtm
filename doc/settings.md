@@ -65,6 +65,8 @@ The file list is built in the following order from the following sources:
    - `name=2000` and `name="2000"` have the same meaning.
  - There is no distinction between XML-attribute and XML-subobject, i.e. any attributes are sub-objects:
    - `<name param=value />` and `<name> <param=value /> </name>` have the same meaning.
+ - No spaces are allowed between the opening angle bracket and the name when declaring an XML-subobject.
+   - `... < name ...`, `... <= ...`, `... << ...` are treated as parts of Lua script code.
  - In addition to a set of sub-objects each object can contain its own text value:
    - E.g. `<name=names_value param=params_value />` - subobject `name` has text value `names_value`.
  - Each object can be defined in any way, either using an XML-attribute or an XML-subobject syntax:
@@ -885,7 +887,7 @@ Notes
                 </config>
             </item>
             <item id="Tile" label="Window Manager"  type="tile" title="Window Manager" cmd="h1:1(Term, Term)"      tooltip=" Tiling Window Manager           \n   LeftClick to launch instance  \n   RightClick to set as default  "/>
-            <item id="Site" label="Viewport Marker" type="site" title="\e[11:3pSite "  cmd="@" winform="maximized" tooltip=" Desktop Viewport Marker         \n   LeftClick to launch instance  \n   RightClick to set as default  "/>  <!-- "\e[11:3p" for center alignment, cmd="@" for instance numbering -->
+            <item id="Site" label="Viewport Marker" type="site" title="Site "          cmd="@" winform="maximized" tooltip=" Desktop Viewport Marker         \n   LeftClick to launch instance  \n   RightClick to set as default  "/>  <!-- "\e[11:3p" for center alignment, cmd="@" for instance numbering -->
             <item id="Logs" label="Log Monitor"     type="dtvt" title="Log Monitor"    cmd="$0 -q -r term $0 -m"   tooltip=" Log Monitor                     \n   LeftClick to launch instance  \n   RightClick to set as default  ">
                 <config>
                     <terminal>
